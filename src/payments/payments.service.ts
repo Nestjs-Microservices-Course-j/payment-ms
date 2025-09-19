@@ -10,7 +10,7 @@ export class PaymentsService {
     private readonly stripe = new Stripe(envs.stripeSecret);
 
     async createPaymentSession( paymentSessionDto : PaymentSessionDto ) {
-        const { currency, items } = paymentSessionDto;
+        const { currency, items, orderId } = paymentSessionDto;
 
         //*formateando data a como lo pide stripe
         const line_items = items.map(item => ({
@@ -27,14 +27,16 @@ export class PaymentsService {
         const  session = await this.stripe.checkout.sessions.create({
             //todo: Colocar aqui ID de mi orden
             payment_intent_data: {
-                metadata: {}
+                metadata: {
+                    orderId
+                }
             },
 
             //*items que se estan comprando
             line_items: line_items,
             mode: 'payment',
-            success_url: 'http://localhost:3003/payments/success',
-            cancel_url: 'http://localhost:3003/payments/cancelled'
+            success_url: envs.stripeSuccessUrl,
+            cancel_url: envs.stripeCancelUrl
         });
 
         return session;
@@ -43,14 +45,12 @@ export class PaymentsService {
     async stripeWebhook( request : Request, response : Response ) {
         const signature = request.headers['stripe-signature'];
         let event: Stripe.Event;
-
-        const endpointSecret = 'whsec_4e46be94425a930c86e8d920d3afca4001868695e084db38dcca0a96cac21d0a';
         
         try {
             event = this.stripe.webhooks.constructEvent(
                 request['rawBody'],
                 signature,
-                endpointSecret
+                envs.stripeEndpointSecret
             );
         } catch (error) {
             console.log(`⚠️  Webhook signature verification failed.`, error.message);
@@ -61,10 +61,14 @@ export class PaymentsService {
         switch(event.type) {
             case 'charge.succeeded' :
                 //todo: llamar nuestro microservicio
-                console.log(event);
+                const chargeSucceeded  = event.data.object;
+
+                console.log({
+                    metadata: chargeSucceeded.metadata
+                });
             break;
             default:
-                console.log(`evento no controlado`);
+                console.log(`Event ${event.type } not handled`);
         }        
         
         return response.status(200).json({ signature });
