@@ -1,13 +1,20 @@
 import { Request, Response } from 'express';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import Stripe from 'stripe';
 
-import { envs } from 'src/config';
+import { envs, NATS_SERVICE } from 'src/config';
 import { PaymentSessionDto } from './dto/payment-session';
+import { ClientProxy } from '@nestjs/microservices';
 
 @Injectable()
 export class PaymentsService {
     private readonly stripe = new Stripe(envs.stripeSecret);
+    private readonly logger = new Logger('PaymentsService');
+
+    constructor(
+        @Inject(NATS_SERVICE)
+        private readonly natsClient: ClientProxy
+    ) {}
 
     async createPaymentSession( paymentSessionDto : PaymentSessionDto ) {
         const { currency, items, orderId } = paymentSessionDto;
@@ -24,8 +31,7 @@ export class PaymentsService {
             quantity: item.quantity
         }));
 
-        const  session = await this.stripe.checkout.sessions.create({
-            //todo: Colocar aqui ID de mi orden
+        const  session = await this.stripe.checkout.sessions.create({            
             payment_intent_data: {
                 metadata: {
                     orderId
@@ -39,7 +45,12 @@ export class PaymentsService {
             cancel_url: envs.stripeCancelUrl
         });
 
-        return session;
+        //return session;
+        return {
+            cancelUrl: session.cancel_url,
+            successUrl: session.success_url,
+            url: session.url
+        }
     }
 
     async stripeWebhook( request : Request, response : Response ) {
@@ -59,13 +70,16 @@ export class PaymentsService {
 
 
         switch(event.type) {
-            case 'charge.succeeded' :
-                //todo: llamar nuestro microservicio
+            case 'charge.succeeded' :              
                 const chargeSucceeded  = event.data.object;
+                const payload = {
+                    stripePaymentId: chargeSucceeded.id,
+                    orderId: chargeSucceeded.metadata.orderId,
+                    receiptUrl: chargeSucceeded.receipt_url,
+                }
 
-                console.log({
-                    metadata: chargeSucceeded.metadata
-                });
+               //* la funcion emit es para eventos que no esperamos respuesta
+                this.natsClient.emit('payment.succeeded', payload);  
             break;
             default:
                 console.log(`Event ${event.type } not handled`);

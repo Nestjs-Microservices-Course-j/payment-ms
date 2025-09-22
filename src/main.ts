@@ -22,10 +22,12 @@ async function bootstrap() {
   //*configuracion para convertir esta app hibrida (API/Micorservicios)
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.NATS,
+    
     options: {
       servers: envs.natsServers
-    }
-  });
+    },
+  },
+  { inheritAppConfig: true }); //se utiliza inheritAppConfig por que como es una app hibrida, si no se pone esta opcion, no hereda la configuracion global del app principal (validaciones, filtros, etc) 
 
   //*iniciando los microservicios
   await app.startAllMicroservices();
